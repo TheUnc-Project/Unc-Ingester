@@ -1,0 +1,177 @@
+name: Deploy Lambda Function
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  FUNCTION_NAME: unc-ingester-lambda
+  API_NAME: unc-ingester-api
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Lint code
+        run: |
+          pip install flake8
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
+
+  build-and-deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install and package dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -t ./package/
+          cp ingester_function.py ./package/
+          cp -r handlers/ ./package/
+
+      - name: Create deployment zip
+        run: |
+          cd package
+          zip -r ../lambda-deployment.zip .
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Lambda function
+        run: |
+          if aws lambda get-function --function-name ${{ env.FUNCTION_NAME }} > /dev/null 2>&1; then
+            aws lambda update-function-code \
+              --function-name ${{ env.FUNCTION_NAME }} \
+              --zip-file fileb://lambda-deployment.zip
+          else
+            aws lambda create-function \
+              --function-name ${{ env.FUNCTION_NAME }} \
+              --runtime python3.11 \
+              --role arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/lambda-execution-role \
+              --handler ingester_function.ingester_handler \
+              --zip-file fileb://lambda-deployment.zip \
+              --timeout 30 \
+              --memory-size 128 \
+              --description "Unc Ingester Lambda Function deployed via GitHub Actions"
+          fi
+
+      - name: Update Lambda configuration
+        run: |
+          aws lambda update-function-configuration \
+            --function-name ${{ env.FUNCTION_NAME }} \
+            --runtime python3.11 \
+            --timeout 30 \
+            --memory-size 128
+
+      - name: Wait for Lambda update
+        run: aws lambda wait function-updated --function-name ${{ env.FUNCTION_NAME }}
+
+      - name: Set up or update API Gateway
+        run: |
+          API_ID=$(aws apigateway get-rest-apis \
+            --query "items[?name=='${{ env.API_NAME }}'].id" \
+            --output text)
+
+          if [ -z "$API_ID" ] || [ "$API_ID" = "None" ]; then
+            API_ID=$(aws apigateway create-rest-api \
+              --name ${{ env.API_NAME }} \
+              --description "API Gateway for Unc Ingester Lambda" \
+              --query 'id' --output text)
+          fi
+
+          ROOT_RESOURCE_ID=$(aws apigateway get-resources \
+            --rest-api-id $API_ID \
+            --query 'items[?path==`/`].id' --output text)
+
+          PROXY_RESOURCE_ID=$(aws apigateway get-resources \
+            --rest-api-id $API_ID \
+            --query 'items[?pathPart==`{proxy+}`].id' --output text)
+
+          if [ -z "$PROXY_RESOURCE_ID" ] || [ "$PROXY_RESOURCE_ID" = "None" ]; then
+            PROXY_RESOURCE_ID=$(aws apigateway create-resource \
+              --rest-api-id $API_ID \
+              --parent-id $ROOT_RESOURCE_ID \
+              --path-part '{proxy+}' \
+              --query 'id' --output text)
+          fi
+
+          aws apigateway put-method \
+            --rest-api-id $API_ID \
+            --resource-id $PROXY_RESOURCE_ID \
+            --http-method ANY \
+            --authorization-type NONE || true
+
+          LAMBDA_ARN=$(aws lambda get-function \
+            --function-name ${{ env.FUNCTION_NAME }} \
+            --query 'Configuration.FunctionArn' --output text)
+
+          aws apigateway put-integration \
+            --rest-api-id $API_ID \
+            --resource-id $PROXY_RESOURCE_ID \
+            --http-method ANY \
+            --type AWS_PROXY \
+            --integration-http-method POST \
+            --uri "arn:aws:apigateway:${{ env.AWS_REGION }}:lambda:path/2015-03-31/functions/$LAMBDA_ARN/invocations" || true
+
+          aws apigateway put-method \
+            --rest-api-id $API_ID \
+            --resource-id $ROOT_RESOURCE_ID \
+            --http-method ANY \
+            --authorization-type NONE || true
+
+          aws apigateway put-integration \
+            --rest-api-id $API_ID \
+            --resource-id $ROOT_RESOURCE_ID \
+            --http-method ANY \
+            --type AWS_PROXY \
+            --integration-http-method POST \
+            --uri "arn:aws:apigateway:${{ env.AWS_REGION }}:lambda:path/2015-03-31/functions/$LAMBDA_ARN/invocations" || true
+
+          aws lambda add-permission \
+            --function-name ${{ env.FUNCTION_NAME }} \
+            --statement-id apigateway-invoke \
+            --action lambda:InvokeFunction \
+            --principal apigateway.amazonaws.com \
+            --source-arn "arn:aws:execute-api:${{ env.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:$API_ID/*/*" || true
+
+          aws apigateway create-deployment \
+            --rest-api-id $API_ID \
+            --stage-name prod \
+            --description "Production deployment"
+
+          echo "API Gateway URL: https://$API_ID.execute-api.${{ env.AWS_REGION }}.amazonaws.com/prod"
