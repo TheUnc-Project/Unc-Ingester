@@ -4,13 +4,11 @@ Webhook handler for POST /webhooks requests.
 
 # Import logger_setup first to initialize logging configuration
 # This import is used for its side effects
-import logger_setup
 
-import logging
+import config
+from logger_setup import logger
+
 from typing import Dict, Any
-
-logger = logging.getLogger()
-
 
 def handler(event: Dict[str, Any], body: Any) -> Dict[str, Any]:
     """

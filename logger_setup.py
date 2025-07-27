@@ -1,24 +1,30 @@
 """
-Logger setup for the application.
-This module should be imported first to ensure proper logging configuration.
+Sets up structured JSON logging for the application.
+This module should be imported first to ensure logging is configured properly.
 """
-
+import config
 import logging
 import json_logging
-from config import DD_ENV, DD_SERVICE, DD_VERSION
+import os
 
-# Configure JSON logging
+# Fallback defaults for environments that may not preload these variables
+DD_SERVICE = os.environ.get("DD_SERVICE", "unc-ingester")
+DD_ENV = os.environ.get("DD_ENV", "dev")
+DD_VERSION = os.environ.get("DD_VERSION", "1.0.0")
+
+# Initialize JSON logging for AWS Lambda
 json_logging.init_lambda()
 json_logging.init_request_instrument()
 
-# Configure root logger
+# Get root logger and set level
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 
-# Add custom fields to all log records
 class DatadogContextFilter(logging.Filter):
-    def filter(self, record):
+    """Injects Datadog-specific fields into each log record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
         record.dd_service = DD_SERVICE
         record.dd_env = DD_ENV
         record.dd_version = DD_VERSION
@@ -26,3 +32,5 @@ class DatadogContextFilter(logging.Filter):
 
 
 logger.addFilter(DatadogContextFilter())
+
+__all__ = ["logger"]

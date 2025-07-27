@@ -4,14 +4,13 @@ AWS Lambda ingester function.
 
 # Import logger_setup first to initialize logging configuration
 # This import is used for its side effects
-import logger_setup
+import config
+from logger_setup import logger
 
 import json
 import logging
 from typing import Dict, Any
 from handlers.post_webhooks import handler as webhook_handler
-
-logger = logging.getLogger()
 
 def ingester_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
