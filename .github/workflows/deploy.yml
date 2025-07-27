@@ -57,6 +57,9 @@ jobs:
             aws lambda update-function-code \
                 --function-name ${{ env.FUNCTION_NAME }} \
                 --zip-file fileb://lambda-deployment.zip
+
+            echo "Waiting for code update to complete..."
+            aws lambda wait function-updated --function-name ${{ env.FUNCTION_NAME }}
             else
             echo "Creating new Lambda function..."
             aws lambda create-function \
@@ -69,7 +72,7 @@ jobs:
                 --memory-size 128 \
                 --description "Unc Ingester Lambda Function deployed via GitHub Actions"
 
-            echo "Waiting for function to finish creating..."
+            echo "Waiting for function creation to complete..."
             aws lambda wait function-exists --function-name ${{ env.FUNCTION_NAME }}
             aws lambda wait function-updated --function-name ${{ env.FUNCTION_NAME }}
             fi
