@@ -1,12 +1,17 @@
+"""
+AWS Lambda ingester function.
+"""
+
+# Import logger_setup first to initialize logging configuration
+# This import is used for its side effects
+import logger_setup
+
 import json
 import logging
 from typing import Dict, Any
 from handlers.post_webhooks import handler as webhook_handler
 
-# Configure logging
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
 
 def ingester_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
@@ -20,18 +25,22 @@ def ingester_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         Dict containing the response with statusCode, headers, and body
     """
     try:
-        logger.info(f"Received event: {json.dumps(event)}")
-
-        # Extract HTTP method and path if available
         http_method = event.get("httpMethod", "UNKNOWN")
         path = event.get("path", "/")
+
+        logger.info(
+            "Processing request",
+            extra={"http_method": http_method, "path": path, "event": event},
+        )
 
         body = event.get("body")
         if body:
             try:
                 body = json.loads(body)
             except json.JSONDecodeError:
-                logger.warning("Failed to parse request body as JSON")
+                logger.warning(
+                    "Failed to parse request body as JSON", extra={"body": body}
+                )
 
         # Process the request based on HTTP method and path
         if http_method == "POST" and path == "/webhooks":
@@ -42,7 +51,6 @@ def ingester_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "path": path,
             }
 
-        # Return successful response
         return {
             "statusCode": 200,
             "headers": {
@@ -55,7 +63,14 @@ def ingester_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        logger.error(f"Error processing request: {str(e)}")
+        logger.error(
+            "Error processing request",
+            extra={
+                "error": str(e),
+                "http_method": event.get("httpMethod", "UNKNOWN"),
+                "path": event.get("path", "/"),
+            },
+        )
 
         # Return error response
         return {
