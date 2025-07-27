@@ -26,10 +26,12 @@ jobs:
 
       - name: Install and package dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt -t ./package/
-          cp ingester_function.py ./package/
-          cp -r handlers/ ./package/
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt -t ./package/
+            cp ingester_function.py ./package/
+            cp config.py ./package/
+            cp logger_setup.py ./package/
+            cp -r handlers/ ./package/
 
       - name: Create deployment zip
         run: |
