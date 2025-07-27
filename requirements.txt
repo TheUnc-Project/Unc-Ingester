@@ -17,8 +17,8 @@ python-dateutil==2.8.2
 # Validation library
 pydantic==2.7.1
 
-# JSON logging
-json-logging==1.3.0
-
 # Datadog monitoring
 datadog-lambda==7.112.0
+
+# JSON logging
+json-logging-py==0.2
