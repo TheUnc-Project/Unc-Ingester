@@ -43,6 +43,13 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Verify IAM role exists
+        run: |
+          if ! aws iam get-role --role-name ingester-lambda-execution-role > /dev/null 2>&1; then
+            echo "Error: ingester-lambda-execution-role not found!"
+            exit 1
+          fi
+
       - name: Deploy Lambda function
         run: |
           if aws lambda get-function --function-name ${{ env.FUNCTION_NAME }} > /dev/null 2>&1; then
@@ -53,7 +60,7 @@ jobs:
             aws lambda create-function \
               --function-name ${{ env.FUNCTION_NAME }} \
               --runtime python3.11 \
-              --role arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/lambda-execution-role \
+              --role arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/ingester-lambda-execution-role \
               --handler ingester_function.ingester_handler \
               --zip-file fileb://lambda-deployment.zip \
               --timeout 30 \
@@ -145,4 +152,7 @@ jobs:
             --stage-name prod \
             --description "Production deployment"
 
+          echo ""
+          echo "Deployment Complete!"
+          echo "Your webhook endpoint: https://$API_ID.execute-api.${{ env.AWS_REGION }}.amazonaws.com/prod/webhooks"
           echo "API Gateway URL: https://$API_ID.execute-api.${{ env.AWS_REGION }}.amazonaws.com/prod"
