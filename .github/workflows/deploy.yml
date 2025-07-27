@@ -50,31 +50,41 @@ jobs:
             exit 1
           fi
 
-      - name: Deploy Lambda function
+      - name: Deploy or create Lambda function
         run: |
-          if aws lambda get-function --function-name ${{ env.FUNCTION_NAME }} > /dev/null 2>&1; then
+            if aws lambda get-function --function-name ${{ env.FUNCTION_NAME }} > /dev/null 2>&1; then
+            echo "Updating existing Lambda function code..."
             aws lambda update-function-code \
-              --function-name ${{ env.FUNCTION_NAME }} \
-              --zip-file fileb://lambda-deployment.zip
-          else
+                --function-name ${{ env.FUNCTION_NAME }} \
+                --zip-file fileb://lambda-deployment.zip
+            else
+            echo "Creating new Lambda function..."
             aws lambda create-function \
-              --function-name ${{ env.FUNCTION_NAME }} \
-              --runtime python3.11 \
-              --role arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/ingester-lambda-execution-role \
-              --handler ingester_function.ingester_handler \
-              --zip-file fileb://lambda-deployment.zip \
-              --timeout 30 \
-              --memory-size 128 \
-              --description "Unc Ingester Lambda Function deployed via GitHub Actions"
-          fi
+                --function-name ${{ env.FUNCTION_NAME }} \
+                --runtime python3.11 \
+                --role arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/ingester-lambda-execution-role \
+                --handler ingester_function.ingester_handler \
+                --zip-file fileb://lambda-deployment.zip \
+                --timeout 30 \
+                --memory-size 128 \
+                --description "Unc Ingester Lambda Function deployed via GitHub Actions"
+
+            echo "Waiting for function to finish creating..."
+            aws lambda wait function-exists --function-name ${{ env.FUNCTION_NAME }}
+            aws lambda wait function-updated --function-name ${{ env.FUNCTION_NAME }}
+            fi
 
       - name: Update Lambda configuration
         run: |
-          aws lambda update-function-configuration \
+            echo "Updating Lambda configuration..."
+            aws lambda update-function-configuration \
             --function-name ${{ env.FUNCTION_NAME }} \
             --runtime python3.11 \
             --timeout 30 \
             --memory-size 128
+
+            echo "Waiting for configuration update to complete..."
+            aws lambda wait function-updated --function-name ${{ env.FUNCTION_NAME }}
 
       - name: Wait for Lambda update
         run: aws lambda wait function-updated --function-name ${{ env.FUNCTION_NAME }}
@@ -152,7 +162,6 @@ jobs:
             --stage-name prod \
             --description "Production deployment"
 
-          echo ""
           echo "Deployment Complete!"
           echo "Your webhook endpoint: https://$API_ID.execute-api.${{ env.AWS_REGION }}.amazonaws.com/prod/webhooks"
           echo "API Gateway URL: https://$API_ID.execute-api.${{ env.AWS_REGION }}.amazonaws.com/prod"
