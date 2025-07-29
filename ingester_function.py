@@ -34,8 +34,7 @@ def ingester_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "Processing request",
             http_method=http_method,
             path=path,
-            event=event,
-            context=context,
+            event=event
         )
 
         body = event.get("body")
