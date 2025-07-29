@@ -9,8 +9,21 @@ from botocore.exceptions import ClientError
 
 # Determine the AWS region (default to us-east-1)
 AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+QUEUE_NAME = "unc-consumer-queue.fifo"
 secrets_client = boto3.client("secretsmanager", region_name=AWS_REGION)
+sqs_client = boto3.client("sqs", region_name=AWS_REGION)
 
+def get_queue_url() -> str:
+    """Get the SQS queue URL for the configured queue name."""
+    try:
+        response = sqs_client.get_queue_url(QueueName=QUEUE_NAME)
+        return response["QueueUrl"]
+    except ClientError as e:
+        raise RuntimeError(
+            f"Unable to get queue URL for '{QUEUE_NAME}': {e.response['Error']['Message']}"
+        )
+
+SQS_QUEUE_URL = get_queue_url()
 
 def get_secret(secret_name: str) -> str:
     """Retrieve a secret string from AWS Secrets Manager."""

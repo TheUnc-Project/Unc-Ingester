@@ -3,11 +3,11 @@ Webhook handler for POST /webhooks requests.
 """
 
 from typing import Dict, Any
+from config import sqs_client, SQS_QUEUE_URL
 from logger_setup import get_logger
 
 # Get logger
 logger = get_logger("webhook_handler")
-
 
 def handler(event: Dict[str, Any], body: Any) -> Dict[str, Any]:
     """
@@ -27,7 +27,31 @@ def handler(event: Dict[str, Any], body: Any) -> Dict[str, Any]:
         event=event,
     )
 
-    return {
-        "message": "Webhook received",
-        "body": body,
-    }
+    if not SQS_QUEUE_URL:
+        error_msg = "SQS_QUEUE_URL environment variable not set"
+        logger.error(error_msg)
+        return {"statusCode": 500, "body": {"error": error_msg}}
+
+    try:
+        # Send message to SQS queue
+        response = sqs_client.send_message(
+            QueueUrl=SQS_QUEUE_URL,
+            MessageBody=body,
+        )
+
+        logger.info(
+            "Successfully sent message to queue",
+            event_type="message_queued",
+            queue_url=SQS_QUEUE_URL,
+            message_id=response["MessageId"],
+        )
+
+        return {
+            "statusCode": 200,
+            "message": "Webhook received and queued"
+        }
+
+    except Exception as e:
+        error_msg = f"Failed to send message to queue: {str(e)}"
+        logger.error(error_msg, event_type="queue_error", error=str(e))
+        return {"statusCode": 500, "body": {"error": error_msg}}
