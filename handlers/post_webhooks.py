@@ -2,13 +2,12 @@
 Webhook handler for POST /webhooks requests.
 """
 
-# Import logger_setup first to initialize logging configuration
-# This import is used for its side effects
-
-import config
-from logger_setup import logger
-
 from typing import Dict, Any
+from logger_setup import get_logger
+
+# Get logger
+logger = get_logger("webhook_handler")
+
 
 def handler(event: Dict[str, Any], body: Any) -> Dict[str, Any]:
     """
@@ -23,11 +22,9 @@ def handler(event: Dict[str, Any], body: Any) -> Dict[str, Any]:
     """
     logger.info(
         "Processing webhook request",
-        extra={
-            "event_type": "webhook_received",
-            "body_size": len(str(body)),
-            "event": event,
-        },
+        event_type="webhook_received",
+        body_size=len(str(body)),
+        event=event,
     )
 
     return {

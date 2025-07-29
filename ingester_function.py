@@ -2,15 +2,18 @@
 AWS Lambda ingester function.
 """
 
-# Import logger_setup first to initialize logging configuration
-# This import is used for its side effects
+# Import config first to ensure environment variables and secrets are set up
 import config
-from logger_setup import logger
-
 import json
 import logging
 from typing import Dict, Any
 from handlers.post_webhooks import handler as webhook_handler
+from logger_setup import get_logger
+
+# Configure logging
+logger = get_logger("ingester")
+logger.logger.setLevel(logging.INFO)
+
 
 def ingester_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
@@ -29,16 +32,19 @@ def ingester_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         logger.info(
             "Processing request",
-            extra={"http_method": http_method, "path": path, "event": event},
+            http_method=http_method,
+            path=path,
+            event=event,
+            context=context,
         )
 
         body = event.get("body")
         if body:
             try:
                 body = json.loads(body)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
                 logger.warning(
-                    "Failed to parse request body as JSON", extra={"body": body}
+                    "Failed to parse request body as JSON", body=body, error=e
                 )
 
         # Process the request based on HTTP method and path
@@ -64,11 +70,9 @@ def ingester_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except Exception as e:
         logger.error(
             "Error processing request",
-            extra={
-                "error": str(e),
-                "http_method": event.get("httpMethod", "UNKNOWN"),
-                "path": event.get("path", "/"),
-            },
+            error=e,
+            http_method=event.get("httpMethod", "UNKNOWN"),
+            path=event.get("path", "/"),
         )
 
         # Return error response

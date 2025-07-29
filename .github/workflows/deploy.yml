@@ -2,7 +2,7 @@ name: Deploy Lambda Function
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main]
 
@@ -10,6 +10,7 @@ env:
   AWS_REGION: us-east-1
   FUNCTION_NAME: unc-ingester-lambda
   API_NAME: unc-ingester-api
+  QUEUE_NAME: unc-consumer-queue.fifo
 
 jobs:
   build-and-deploy:
@@ -26,12 +27,12 @@ jobs:
 
       - name: Install and package dependencies
         run: |
-            python -m pip install --upgrade pip
-            pip install -r requirements.txt -t ./package/
-            cp ingester_function.py ./package/
-            cp config.py ./package/
-            cp logger_setup.py ./package/
-            cp -r handlers/ ./package/
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -t ./package/
+          cp ingester_function.py ./package/
+          cp config.py ./package/
+          cp logger_setup.py ./package/
+          cp -r handlers/ ./package/
 
       - name: Create deployment zip
         run: |
@@ -45,51 +46,117 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Verify IAM role exists
+      - name: Create or verify IAM role and permissions
         run: |
-          if ! aws iam get-role --role-name ingester-lambda-execution-role > /dev/null 2>&1; then
-            echo "Error: ingester-lambda-execution-role not found!"
-            exit 1
+          ROLE_NAME="ingester-lambda-execution-role"
+
+          # Create role if it doesn't exist
+          if ! aws iam get-role --role-name $ROLE_NAME > /dev/null 2>&1; then
+            echo "Creating $ROLE_NAME..."
+            
+            # Create the role with trust policy for Lambda
+            aws iam create-role \
+              --role-name $ROLE_NAME \
+              --assume-role-policy-document '{
+                "Version": "2012-10-17",
+                "Statement": [{
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Service": "lambda.amazonaws.com"
+                  },
+                  "Action": "sts:AssumeRole"
+                }]
+              }'
+          else
+            echo "Role $ROLE_NAME already exists"
           fi
+
+          # Ensure basic Lambda execution policy is attached
+          BASIC_POLICY_ARN="arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+          if ! aws iam list-attached-role-policies --role-name $ROLE_NAME | grep -q "$BASIC_POLICY_ARN"; then
+            echo "Attaching Lambda basic execution policy..."
+            aws iam attach-role-policy \
+              --role-name $ROLE_NAME \
+              --policy-arn $BASIC_POLICY_ARN
+          else
+            echo "Lambda basic execution policy already attached"
+          fi
+
+          # Update or create custom permissions policy
+          echo "Ensuring custom permissions are up to date..."
+          aws iam put-role-policy \
+            --role-name $ROLE_NAME \
+            --policy-name CustomPermissions \
+            --policy-document '{
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "secretsmanager:GetSecretValue"
+                  ],
+                  "Resource": "arn:aws:secretsmanager:*:*:secret:*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "execute-api:Invoke",
+                    "execute-api:ManageConnections"
+                  ],
+                  "Resource": "arn:aws:execute-api:*:*:*"
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "sqs:SendMessage",
+                    "sqs:GetQueueUrl"
+                  ],
+                  "Resource": "arn:aws:sqs:*:*:unc-consumer-queue.fifo"
+                }
+              ]
+            }'
+
+          echo "Waiting for role/policy changes to propagate..."
+          sleep 10
 
       - name: Deploy or create Lambda function
         run: |
-            if aws lambda get-function --function-name ${{ env.FUNCTION_NAME }} > /dev/null 2>&1; then
-            echo "Updating existing Lambda function code..."
-            aws lambda update-function-code \
-                --function-name ${{ env.FUNCTION_NAME }} \
-                --zip-file fileb://lambda-deployment.zip
+          if aws lambda get-function --function-name ${{ env.FUNCTION_NAME }} > /dev/null 2>&1; then
+          echo "Updating existing Lambda function code..."
+          aws lambda update-function-code \
+              --function-name ${{ env.FUNCTION_NAME }} \
+              --zip-file fileb://lambda-deployment.zip
 
-            echo "Waiting for code update to complete..."
-            aws lambda wait function-updated --function-name ${{ env.FUNCTION_NAME }}
-            else
-            echo "Creating new Lambda function..."
-            aws lambda create-function \
-                --function-name ${{ env.FUNCTION_NAME }} \
-                --runtime python3.11 \
-                --role arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/ingester-lambda-execution-role \
-                --handler ingester_function.ingester_handler \
-                --zip-file fileb://lambda-deployment.zip \
-                --timeout 30 \
-                --memory-size 128 \
-                --description "Unc Ingester Lambda Function deployed via GitHub Actions"
+          echo "Waiting for code update to complete..."
+          aws lambda wait function-updated --function-name ${{ env.FUNCTION_NAME }}
+          else
+          echo "Creating new Lambda function..."
+          aws lambda create-function \
+              --function-name ${{ env.FUNCTION_NAME }} \
+              --runtime python3.11 \
+              --role arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/ingester-lambda-execution-role \
+              --handler ingester_function.ingester_handler \
+              --zip-file fileb://lambda-deployment.zip \
+              --timeout 30 \
+              --memory-size 128 \
+              --description "Unc Ingester Lambda Function deployed via GitHub Actions"
 
-            echo "Waiting for function creation to complete..."
-            aws lambda wait function-exists --function-name ${{ env.FUNCTION_NAME }}
-            aws lambda wait function-updated --function-name ${{ env.FUNCTION_NAME }}
-            fi
+          echo "Waiting for function creation to complete..."
+          aws lambda wait function-exists --function-name ${{ env.FUNCTION_NAME }}
+          aws lambda wait function-updated --function-name ${{ env.FUNCTION_NAME }}
+          fi
 
       - name: Update Lambda configuration
         run: |
-            echo "Updating Lambda configuration..."
-            aws lambda update-function-configuration \
-            --function-name ${{ env.FUNCTION_NAME }} \
-            --runtime python3.11 \
-            --timeout 30 \
-            --memory-size 128
+          echo "Updating Lambda configuration..."
+          aws lambda update-function-configuration \
+          --function-name ${{ env.FUNCTION_NAME }} \
+          --runtime python3.11 \
+          --timeout 30 \
+          --memory-size 128
 
-            echo "Waiting for configuration update to complete..."
-            aws lambda wait function-updated --function-name ${{ env.FUNCTION_NAME }}
+          echo "Waiting for configuration update to complete..."
+          aws lambda wait function-updated --function-name ${{ env.FUNCTION_NAME }}
 
       - name: Wait for Lambda update
         run: aws lambda wait function-updated --function-name ${{ env.FUNCTION_NAME }}

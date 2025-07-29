@@ -1,32 +1,42 @@
 """
-Sets up structured JSON logging for the application.
-This module should be imported first to ensure logging is configured properly.
+Logger setup for structured logging
 """
-import config
+
+import json
 import logging
-import os
 
-# Fallback defaults for environments that may not preload these variables
-DD_SERVICE = os.environ.get("DD_SERVICE", "unc-ingester")
-DD_ENV = os.environ.get("DD_ENV", "dev")
-DD_VERSION = os.environ.get("DD_VERSION", "1.0.0")
+class Logger:
+    def __init__(self, name: str):
+        self.logger = logging.getLogger(name)
+        self.name = name
 
-print("ENV", DD_SERVICE, DD_ENV, DD_VERSION)
+    def _format_log(self, message: str, **kwargs) -> str:
+        """Format log message with metadata as JSON."""
+        return json.dumps({"message": message, "service": self.name, **kwargs})
 
-# Get root logger and set level
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+    def info(self, message: str, **kwargs) -> None:
+        """Log info level message."""
+        self.logger.info(self._format_log(message, **kwargs))
 
-class DatadogContextFilter(logging.Filter):
-    """Injects Datadog-specific fields into each log record."""
+    def error(self, message: str, error: Exception = None, **kwargs) -> None:
+        """Log error level message."""
+        error_details = (
+            {"error_type": error.__class__.__name__, "error_message": str(error)}
+            if error
+            else {"error_message": kwargs.get("error", "Unknown error")}
+        )
 
-    def filter(self, record: logging.LogRecord) -> bool:
-        record.dd_service = DD_SERVICE
-        record.dd_env = DD_ENV
-        record.dd_version = DD_VERSION
-        return True
+        self.logger.error(self._format_log(message, **error_details, **kwargs))
+
+    def warning(self, message: str, **kwargs) -> None:
+        """Log warning level message."""
+        self.logger.warning(self._format_log(message, **kwargs))
+
+    def debug(self, message: str, **kwargs) -> None:
+        """Log debug level message."""
+        self.logger.debug(self._format_log(message, **kwargs))
 
 
-logger.addFilter(DatadogContextFilter())
-
-__all__ = ["logger"]
+def get_logger(name: str) -> Logger:
+    """Get a configured logger instance."""
+    return Logger(name)
