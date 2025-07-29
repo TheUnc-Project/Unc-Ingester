@@ -7,6 +7,7 @@ import config
 import json
 import logging
 from typing import Dict, Any
+from urllib.parse import parse_qs, unquote_plus
 from handlers.post_webhooks import handler as webhook_handler
 from logger_setup import get_logger
 
@@ -31,21 +32,11 @@ def ingester_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         path = event.get("path", "/")
 
         logger.info(
-            "Processing request",
-            http_method=http_method,
-            path=path,
-            event=event
+            "Processing request", http_method=http_method, path=path, event=event
         )
 
         body = event.get("body")
-        if body:
-            try:
-                body = json.loads(body)
-            except json.JSONDecodeError as e:
-                logger.warning(
-                    "Failed to parse request body as JSON", body=body, error=e
-                )
-
+        
         # Process the request based on HTTP method and path
         if http_method == "POST" and path == "/webhooks":
             response_data = webhook_handler(event, body)

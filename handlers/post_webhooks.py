@@ -23,7 +23,7 @@ def handler(event: Dict[str, Any], body: Any) -> Dict[str, Any]:
     logger.info(
         "Processing webhook request",
         event_type="webhook_received",
-        body_size=len(str(body)),
+        body=body,
         event=event,
     )
 
