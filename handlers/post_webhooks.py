@@ -3,11 +3,13 @@ Webhook handler for POST /webhooks requests.
 """
 
 from typing import Dict, Any
+import uuid
 from config import sqs_client, SQS_QUEUE_URL
 from logger_setup import get_logger
 
 # Get logger
 logger = get_logger("webhook_handler")
+
 
 def handler(event: Dict[str, Any], body: Any) -> Dict[str, Any]:
     """
@@ -33,17 +35,19 @@ def handler(event: Dict[str, Any], body: Any) -> Dict[str, Any]:
         return {"statusCode": 500, "body": {"error": error_msg}}
 
     try:
+        # Generate a unique deduplication ID
+        deduplication_id = str(uuid.uuid4())
+
         # Send message to SQS queue
         response = sqs_client.send_message(
             QueueUrl=SQS_QUEUE_URL,
             MessageBody=body,
+            MessageGroupId="webhook_group",  # Group ID for FIFO queue
+            MessageDeduplicationId=deduplication_id,  # Unique ID to prevent duplicates
         )
 
         logger.info(
-            "Successfully sent message to queue",
-            event_type="message_queued",
-            queue_url=SQS_QUEUE_URL,
-            message_id=response["MessageId"],
+            "Successfully sent message to queue"
         )
 
         return {
